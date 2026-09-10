@@ -861,8 +861,8 @@ const MapView = ({
           style={{ width: '100%', height: '100%' }}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://carto.com/">CartoDB</a>'
+            url={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.NEXT_PUBLIC_CARTO_API_KEY || ''}`}
+            attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           />
           <MapController startCoords={startCoords} endCoords={endCoords} route={route} />
 
