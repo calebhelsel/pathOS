@@ -151,7 +151,7 @@ const ExplorePage = () => {
   interface Stop {
     location: string;
     coords: Coords | null;
-    weightKg: number;
+    weightKg: number | string;
   }
 
   /*=======================================================
@@ -247,7 +247,9 @@ const ExplorePage = () => {
   // handle a change to a stop's pickup weight
   const handleWeightChange = (index: number, value: string) => {
     const newStops = [...formData.stops];
-    newStops[index] = { ...newStops[index], weightKg: parseFloat(value) || 0 };
+    // Keep the text as entered so an empty field stays empty and explicit
+    // leading zeros (for example, typing 0 before 5) remain the user's choice.
+    newStops[index] = { ...newStops[index], weightKg: value };
     setFormData((prev) => ({ ...prev, stops: newStops }));
   };
 
@@ -374,7 +376,13 @@ const ExplorePage = () => {
           response = await fetch(`${backendUrl}/optimize_route`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData),
+            body: JSON.stringify({
+              ...formData,
+              stops: formData.stops.map((stop) => ({
+                ...stop,
+                weightKg: Number(stop.weightKg) || 0,
+              })),
+            }),
           });
 
           // Break loop on explicit returns (success or deliberate error)
@@ -666,7 +674,7 @@ const ExplorePage = () => {
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <input
                           type="number"
-                          value={stop.weightKg}
+                          value={stop.weightKg === 0 ? '' : stop.weightKg}
                           onChange={(e) => handleWeightChange(index, e.target.value)}
                           min={0}
                           step={0.01}

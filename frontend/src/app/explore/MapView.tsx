@@ -290,15 +290,25 @@ const AnalyticsPanel = ({ isOpen, onClose, metrics, formData, imperial, setImper
       ? `${label}: ${toFuel(fuelL, true)} gal over ${toDistance(distKm, true)} mi = ${toEff(fuelL, distKm, true)} MPG.`
       : `${label}: ${fuelL} L ÷ ${distKm} km × 100 = ${toEff(fuelL, distKm, false)} L/100km.`;
 
-  // Builds a Google Maps directions URL for the ordered stop list.
-  // First stop = origin, last = destination, middle stops = waypoints.
-  const buildGoogleMapsUrl = (stops: any[]) => {
-    if (!stops || stops.length < 2) return null;
-    const origin = `${stops[0].coords.lat},${stops[0].coords.lng}`;
-    const dest = `${stops[stops.length - 1].coords.lat},${stops[stops.length - 1].coords.lng}`;
-    const mids = stops.slice(1, -1);
-    const waypointStr = mids.map((s: any) => `${s.coords.lat},${s.coords.lng}`).join('|');
-    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypointStr ? `&waypoints=${encodeURIComponent(waypointStr)}` : ''}&travelmode=driving`;
+  // Google Maps directions supports up to 10 destinations per route. Split
+  // long optimized routes into links of 10 stops, carrying each endpoint
+  // forward as the next link's origin so no leg is skipped.
+  const buildGoogleMapsUrls = (stops: any[]) => {
+    if (!stops || stops.length < 2) return [];
+    const maxStopsPerLink = 10;
+    const urls: string[] = [];
+
+    for (let start = 0; start < stops.length - 1;) {
+      const segment = stops.slice(start, Math.min(start + maxStopsPerLink, stops.length));
+      const origin = `${segment[0].coords.lat},${segment[0].coords.lng}`;
+      const dest = `${segment[segment.length - 1].coords.lat},${segment[segment.length - 1].coords.lng}`;
+      const waypointStr = segment.slice(1, -1)
+        .map((s: any) => `${s.coords.lat},${s.coords.lng}`)
+        .join('|');
+      urls.push(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypointStr ? `&waypoints=${encodeURIComponent(waypointStr)}` : ''}&travelmode=driving`);
+      start += segment.length - 1;
+    }
+    return urls;
   };
 
   // ── Export handlers ──────────────────────────────────────────────────────
@@ -306,14 +316,14 @@ const AnalyticsPanel = ({ isOpen, onClose, metrics, formData, imperial, setImper
   // since downstream tools (spreadsheets, APIs) expect consistent units.
 
   const handleExport = () => {
-    const googleMapsUrl = buildGoogleMapsUrl(formData.stops);
+    const googleMapsUrls = buildGoogleMapsUrls(formData.stops);
     const reportData = {
       routeInfo: {
         vehicleNumber: formData.vehicleNumber,
         startLocation: formData.stops[0]?.location,
         endLocation: formData.stops[formData.stops.length - 1]?.location,
         date: new Date().toLocaleDateString(),
-        googleMapsUrl,
+        googleMapsUrls,
       },
       stops: formData.stops.map((stop: any, idx: number) => ({
         stopNumber: idx + 1,
@@ -386,7 +396,7 @@ const AnalyticsPanel = ({ isOpen, onClose, metrics, formData, imperial, setImper
   const handleExportPdf = () => {
     const vehicle = formData.vehicleNumber || 'Route';
     const date = new Date().toLocaleDateString();
-    const googleMapsUrl = buildGoogleMapsUrl(formData.stops);
+    const googleMapsUrls = buildGoogleMapsUrls(formData.stops);
     const stopsHtml = formData.stops
       .map((s: any, i: number) => {
         const total = formData.stops.length;
@@ -419,7 +429,7 @@ const AnalyticsPanel = ({ isOpen, onClose, metrics, formData, imperial, setImper
       </head><body>
       <h1>Route Report</h1>
       <p style="color:#555;font-size:13px;">Vehicle: <strong>${vehicle}</strong> &nbsp;·&nbsp; Date: <strong>${date}</strong></p>
-      ${googleMapsUrl ? `<p style="font-size:12px;"><a href="${googleMapsUrl}" style="color:#034626;">Open in Google Maps</a></p>` : ''}
+      ${googleMapsUrls.map((url: string, index: number) => `<p style="font-size:12px;"><a href="${url}" style="color:#034626;">Open in Google Maps${googleMapsUrls.length > 1 ? ` — Part ${index + 1} of ${googleMapsUrls.length}` : ''}</a></p>`).join('')}
       <h2 style="font-size:15px;margin-top:24px;border-bottom:1px solid #e5e7eb;padding-bottom:6px;">Stop Order</h2>
       <table><tbody>${stopsHtml}</tbody></table>
       <h2 style="font-size:15px;margin-top:24px;border-bottom:1px solid #e5e7eb;padding-bottom:6px;">Route Metrics</h2>
@@ -743,15 +753,19 @@ const AnalyticsPanel = ({ isOpen, onClose, metrics, formData, imperial, setImper
 
             {/* ── Google Maps deep-link ── */}
             {formData.stops?.length >= 2 && (
-              <button
-                onClick={() => {
-                  const url = buildGoogleMapsUrl(formData.stops);
-                  if (url) window.open(url, '_blank');
-                }}
-                className="w-full border border-[#034626] text-[#034626] py-2 px-4 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium"
-              >
-                Open in Google Maps
-              </button>
+              <div className="space-y-2">
+                {buildGoogleMapsUrls(formData.stops).map((url: string, index: number, urls: string[]) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full border border-[#034626] text-[#034626] py-2 px-4 rounded-lg hover:bg-green-50 transition-colors text-sm font-medium text-center"
+                  >
+                    {urls.length > 1 ? `Open in Google Maps — Part ${index + 1} of ${urls.length}` : 'Open in Google Maps'}
+                  </a>
+                ))}
+              </div>
             )}
 
             {/* ── Export dropdown ── */}
