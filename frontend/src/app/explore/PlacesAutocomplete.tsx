@@ -12,6 +12,56 @@ interface Place {
   lon: string;
 }
 
+// Bias search results toward Ithaca, NY (Cornell) so local places rank first.
+// This only nudges ranking — places elsewhere are still returned.
+const ITHACA_BIAS = { lat: 42.444, lon: -76.5019 };
+
+interface PhotonProperties {
+  name?: string;
+  housenumber?: string;
+  street?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  county?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+}
+
+interface PhotonFeature {
+  geometry: { coordinates: [number, number] }; // GeoJSON order: [lon, lat]
+  properties: PhotonProperties;
+}
+
+// Photon returns GeoJSON with structured address parts (no ready-made label),
+// so build a human-readable "display_name" similar to what Nominatim gave us.
+function photonFeatureToPlace(feature: PhotonFeature): Place {
+  const p = feature.properties || ({} as PhotonProperties);
+  const [lon, lat] = feature.geometry?.coordinates || [0, 0];
+
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const locality = p.city || p.town || p.village || p.county;
+
+  const display_name = [
+    p.name,
+    street && street !== p.name ? street : undefined,
+    locality,
+    p.state,
+    p.postcode,
+    p.country,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .filter((part, i, arr) => part !== arr[i - 1]) // drop consecutive duplicates
+    .join(', ');
+
+  return {
+    display_name: display_name || p.name || 'Unknown location',
+    lat: String(lat),
+    lon: String(lon),
+  };
+}
+
 interface PlacesAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
@@ -64,8 +114,11 @@ const PlacesAutocomplete: React.FC<PlacesAutocompleteProps> = ({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
+        // Photon (komoot) — OSM-based search-as-you-type geocoder. Handles place
+        // names / POIs (e.g. "Cornell Dairy Bar") far better than Nominatim,
+        // needs no API key, and allows use with our Leaflet map.
         const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`,
+          `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lang=en&lat=${ITHACA_BIAS.lat}&lon=${ITHACA_BIAS.lon}`,
           { signal: controller.signal }
         );
 
@@ -73,9 +126,10 @@ const PlacesAutocomplete: React.FC<PlacesAutocompleteProps> = ({
 
         if (!response.ok) throw new Error('Search failed');
 
-        const data = await response.json();
-        cache.current[query] = data; // Cache the results
-        setSuggestions(data);
+        const geojson = await response.json();
+        const places: Place[] = (geojson.features || []).map(photonFeatureToPlace);
+        cache.current[query] = places; // Cache the results
+        setSuggestions(places);
       } catch (error) {
         if ((error as Error).name === 'AbortError') {
           console.log('Search request timed out');
